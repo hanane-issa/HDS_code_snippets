@@ -1,0 +1,375 @@
+#--------------------------------------------------------------------------
+#--------------------------------------------------------------------------
+'''
+ML model comparison using data fromthe UCI ML repository: https://archive.ics.uci.edu/ml/datasets/ILPD+(Indian+Liver+Patient+Dataset)
+
+k-nearest neighbor and support vector machine models are compared and evaluated.
+'''
+#--------------------------------------------------------------------------
+#--------------------------------------------------------------------------
+
+#import libraries
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import plotly.express as px
+from mpl_toolkits.mplot3d import Axes3D
+
+from imblearn.over_sampling import RandomOverSampler
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import cross_validate,cross_val_score,KFold, GridSearchCV, train_test_split, learning_curve
+from sklearn.metrics import accuracy_score,roc_auc_score,roc_curve, f1_score, confusion_matrix
+
+
+
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+
+
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore",category=DeprecationWarning)
+    
+#--------------------------------------------------------------------------
+#import dataset 
+
+url2='http://archive.ics.uci.edu/ml/machine-learning-databases/00225/Indian%20Liver%20Patient%20Dataset%20(ILPD).csv'
+
+cols=['age','gender','TB','DB','alkphos','sgpt','sgot','TP','ALB','A/G ratio','target']
+
+'''
+1. Age Age of the patient
+2. Gender Gender of the patient
+3. TB Total Bilirubin
+4. DB Direct Bilirubin
+5. Alkphos Alkaline Phosphotase
+6. Sgpt Alamine Aminotransferase
+7. Sgot Aspartate Aminotransferase
+8. TP Total Protiens
+9. ALB Albumin
+10. A/G Ratio Albumin and Globulin Ratio
+11. Class label = liver disease or not
+
+Source: UCI ML repository
+'''
+
+raw_data = pd.read_csv(url2, header=None,names=cols, na_values="?")
+#--------------------------------------------------------------------------
+#### I. Data exploration & pre-processing
+
+raw_data.head(10)
+
+
+raw_data.describe().T
+#we can already see that there are 4 missing values in the A/G column since the count is less than the others.
+#The variables sgot, sgpt, and alphos have very high maximum values -> to inspect.
+#Those aged above 89 are all labeled as 90.
+
+raw_data.info()
+
+### Missing data
+
+
+
+
+raw_data.isna().sum() #the only null values are for the Albumin and Globulin Ratio
+
+data=raw_data
+data['A/G ratio']=data['A/G ratio'].fillna(data['A/G ratio'].median()) 
+print(data.isna().sum())
+
+### Recoding variables
+
+#Gender
+gender_map={'Female': 1,'Male': 2}
+data['gender'] = data['gender'].map(gender_map)
+data
+
+#Class label
+
+#raw data has label has 2 for diseased(Dx) and 1 for non-diseased(non-Dx)
+#must be coded 1 for Dx and 0 for non-Dx
+
+data['target']=data['target']-1
+data
+
+### Outlier detection
+
+fig, ax = plt.subplots(figsize=(15,10))
+sns.boxplot(data=data, width= 0.5,ax=ax,  fliersize=3)
+plt.title("Visualization of outliers")
+
+#Valid outliers based on domain knowledge -> no outliers removed.
+
+data.plot(kind= 'box' , subplots=True, layout=(4,3), sharex=False, sharey=False, figsize=(10,8))
+
+
+
+data.hist(figsize=(12,10))
+
+#Correlation matrix
+data_corr=data.corr()
+
+'''
+correlated features:
+- sgpt and sgot -> both are aminotransferase
+- TB and DB -> both look at bilirubin
+- ALB and A/G ratio -> both look at albumin
+
+
+'''
+
+data_corr
+
+ax1 = sns.heatmap(data_corr, annot = True, cmap="YlGnBu")
+
+plt.setp(ax.axes.get_xticklabels(), rotation=45)
+plt.rcParams['figure.figsize']=(13,10)
+plt.title('Correlation Matrix for indian liver patient dataset')
+
+### Feature space exploration
+
+X=np.array(data.iloc[:,:10].values) #features
+y = np.array(data.iloc[:, 10].values) #class label
+
+feature1 = data['DB'].values  
+feature2 = data['alkphos'].values 
+feature3 = data['ALB'].values
+
+plt.figure(figsize=(14,8))
+plt.scatter(feature1,feature2, c=y)
+
+
+fig = plt.figure(figsize=(14,12))
+ax = fig.add_subplot(111, projection='3d')
+ax.scatter(feature2, feature1, feature3, c=y)
+ax.set_xlabel('feature2')
+ax.set_ylabel('feature1')
+ax.set_zlabel('feature3')
+
+plt.show()
+
+#a lot of overlap -> this is likely a hard classification problem, non-linear separable.
+
+fig3D = px.scatter_3d(data, x=feature1, y=feature2, z=feature3,color='target',
+              opacity=0.7)
+
+fig3D.update_layout(margin=dict(l=0, r=0, b=0, t=0))
+fig3D.show()
+
+### Data imbalance
+
+print ("instances:", y.size)
+print ("class label 0:", y[y==0].size)
+print ("class label 1:", y[y==1].size)
+
+#Random oversampling of the minority 
+OS = RandomOverSampler()
+osx, osy = OS.fit_resample(X, y)
+osx.shape 
+
+
+
+#Checking that the oversampling worked
+
+print ("class label 0:", osy[osy==0].size)
+print ("class label 1:", osy[osy==1].size)
+
+### Normalization
+
+X_train, X_test,y_train,y_test = train_test_split(osx, osy, test_size=0.3,random_state=42)
+
+mms = MinMaxScaler()
+X_train_norm = mms.fit_transform(X_train)
+X_test_norm = mms.transform(X_test)
+
+X_train_norm
+X_test_norm
+
+#--------------------------------------------------------------------------
+#### II. Baseline analysis
+
+knn = KNeighborsClassifier()
+svm= SVC(random_state=42)
+
+
+models = {"KNN" : knn,
+          "SVM" : svm
+          
+         }
+scores= { }
+
+for key, value in models.items():    
+    model = value
+    model.fit(X_train, y_train)
+    scores[key] = model.score(X_test, y_test, scoring='f1')
+
+scores_table1 = pd.DataFrame(scores, index=["F1 Score"]).T
+scores_table1.sort_values(by=["F1 Score"], axis=0 ,ascending=False, inplace=True)
+scores_table1
+
+# defined the model_check function for easier comparison and evaluation
+def model_check(X, y, classifiers, cv):
+    
+    ''' A function for testing multiple classifiers and return several metrics. '''
+    
+    mtable = pd.DataFrame()
+
+    row_index = 0
+    for cls in clf:
+
+        clf_name = cls.__class__.__name__
+        mtable.loc[row_index, 'Model Name'] = clf_name
+        
+        cv_results = cross_validate(
+            cls,
+            X,
+            y,
+            cv=cv,
+            scoring=('accuracy','f1','roc_auc'),
+            return_train_score=True,
+            n_jobs=-1
+        )
+        mtable.loc[row_index, 'Train Roc/AUC Mean'] = cv_results[
+            'train_roc_auc'].mean()
+    
+        mtable.loc[row_index, 'Train Accuracy Mean'] = cv_results[
+            'train_accuracy'].mean()
+       
+        mtable.loc[row_index, 'Train F1 Mean'] = cv_results[
+            'train_f1'].mean()
+   
+        
+
+        row_index += 1        
+
+    mtable.sort_values(by=['Train F1 Mean'],
+                            ascending=False,
+                            inplace=True)
+
+    return mtable
+
+
+
+cv = KFold(10, shuffle=True, random_state=42)
+clf=[knn, svm]
+
+baseline_models = model_check(X_train, y_train, clf, cv)
+
+display(baseline_models)
+
+## Hyperparameter tuning
+
+#dictionary of hyperparameters for each estimator
+param_svm = [{
+    'C':[0.1,10,100],
+    'kernel':['rbf','poly','sigmoid'],
+    [{'C':[0.1,10,100], 
+               'clf__kernel': ['poly']},
+                 {'clf__C': param_range, 
+                  'clf__gamma': param_range, 
+                  'clf__kernel': ['rbf']}]
+    ] 
+
+param_knn = [{
+    'n_neighbors': [3,5,7,9],
+    'weights': ['uniform', 'distance'],
+    'metric': ['euclidean', 'manhattan','minkowski'] }] 
+
+
+
+#scoring=['accuracy','']
+
+gs1 = GridSearchCV(estimator=svm, 
+                  param_grid=param_svm, 
+                  scoring=('f1'), 
+                 
+                  cv=10)
+
+gs2 = GridSearchCV(estimator=knn, 
+                  param_grid=param_knn, 
+                  scoring=('f1'),
+                  
+                  cv=10)
+
+gs1 = gs1.fit(X_train, y_train)
+print(gs1.best_score_)
+print(gs1.best_params_)
+
+'''
+0.7575234929534433
+{'activation': 'logistic', 
+'alpha': 0.0001,
+'hidden_layer_sizes': (100, 100),
+'learning_rate': 'constant', 
+'max_iter': 200, 
+'solver': 'adam'}
+'''
+
+gs2 = gs2.fit(X_train, y_train)
+print(gs2.best_score_)
+print(gs2.best_params_)
+
+'''
+{'metric': 'euclidean',
+'n_neighbors': 5, 
+'weights': 'distance'}
+'''
+
+cv = KFold(10, shuffle=True, random_state=42)
+
+prange=[0.1,10,100]
+for i in [svm, knn]:
+    
+    if i == svm:
+        parameters = {
+            'C':prange,
+            'kernel':['poly','rbf','linear'],
+            'gamma':prange,
+            'delta':prange
+             } 
+        
+    if i == knn:
+        parameters = {
+    'n_neighbors': [3,5,7,9],
+    'weights': ['uniform', 'distance'],
+    'metric': ['euclidean', 'manhattan','minkowski'] } 
+
+
+    
+    def hp_tune(base_model, parameters,cv, X, y):
+        
+        ''' A function for optimizing mutliple classifiers'''
+        
+   
+        optimal_model = GridSearchCV(base_model,
+                                param_grid=parameters,
+                                cv=cv,
+                                scoring = 'f1',
+                                n_jobs=-1)
+
+        optimal_model.fit(X, y)    
+
+
+        scores = cross_val_score(optimal_model, X, y, cv=cv,n_jobs=-1, scoring='f1')
+        
+
+        print('====================')
+        print(f'Updated Parameters for {str(base_model.__class__.__name__)}')
+        print('Cross Val Mean: {:.3f}, Cross Val Stdev: {:.3f}'.format(scores.mean(), scores.std()))
+        print('Best Score: {:.3f}'.format(optimal_model.best_score_))
+        print('Best Parameters: {}'.format(optimal_model.best_params_))
+        print('====================')
+
+
+        return optimal_model.best_params_, optimal_model.best_score_
+best_params, best_score = hp_tune(i, parameters, cv, X, y)
+i.set_params(**best_params)
+
+GridSearch_models = model_check(X, y, clf, cv)
+display(GridSearch_models)
+
+
+
