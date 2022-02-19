@@ -1,0 +1,104 @@
+#-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+
+#Model 2: ResNet50
+#Python version: 3.8.12
+
+#-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+
+def idblock50(inputs, filters): 
+#block used when input and output sizes match
+   
+  X_merge = inputs
+
+  f1,f2,f3=filters
+   
+  X = Conv2D(filters=f1, kernel_size=(1, 1), strides=(1, 1), padding='valid')(inputs)
+  X = BatchNormalization()(X)
+  X = Activation('relu')(X)
+
+  X = Conv2D(filters=f2, kernel_size=(3, 3), strides=(1, 1), padding='same')(X)
+  X = BatchNormalization()(X)
+  X = Activation('relu')(X)
+
+  X = Conv2D(filters=f3, kernel_size=(1, 1), strides=(1, 1), padding='valid')(X)
+  X = BatchNormalization()(X)
+
+  X = Add()([X, X_merge])# SKIP Connection
+  X = Activation('relu')(X)
+
+  return X
+
+def convblock50(inputs, filters): 
+#block used when input and output sizes dont match
+  
+  f1, f2, f3 = filters
+
+  X_merge = inputs
+
+  X = Conv2D(filters=f1, kernel_size=(1, 1), strides=(2, 2), padding='valid')(inputs)
+  X = BatchNormalization()(X)
+  X = Activation('relu')(X)
+
+  X = Conv2D(filters=f2, kernel_size=(3, 3), strides=(1, 1), padding='same')(X)
+  X = BatchNormalization()(X)
+  X = Activation('relu')(X)
+
+  X = Conv2D(filters=f3, kernel_size=(1, 1), strides=(1, 1), padding='valid')(X)
+  X = BatchNormalization()(X)
+
+  X_merge = Conv2D(filters=f3, kernel_size=(1, 1), strides=(2, 2), padding='valid',kernel_regularizer='l2')(X_merge)
+  X_merge = BatchNormalization()(X_merge)
+
+  X = Add()([X, X_merge])
+  X = Activation('relu')(X)
+  return X
+  
+  #-------------------------------------------------------------------------------
+  #-----Function to build resnet50 architecture
+
+def resnet50(input_shape=(256, 256, 1)):
+
+    random.seed(42)
+    np.random.seed(42)
+    tf.random.set_seed(42)
+    
+    inputs = Input(shape=input_shape, name='in1')
+    
+    X = ZeroPadding2D((3, 3))(inputs)
+    X = Conv2D(64, (7, 7), strides=(2, 2))(X) #kernel initializer needed?
+    X = BatchNormalization()(X)
+    X = Activation('relu')(X)
+    X = MaxPool2D((3, 3), strides=(2, 2))(X)
+
+
+    X = convblock50(X, filters=[64, 64, 256])
+    X = idblock50(X, [64, 64, 256])
+    X = idblock50(X, [64, 64, 256])
+
+
+    X = convblock50(X, filters=[128, 128, 512])
+    X = idblock50(X,[128, 128, 512])
+    X = idblock50(X,[128, 128, 512])
+    X = idblock50(X,[128, 128, 512])
+
+    X = convblock50(X, filters=[256, 256, 1024])
+    X = idblock50(X,[256, 256, 1024])
+    X = idblock50(X,[256, 256, 1024])
+    X = idblock50(X,[256, 256, 1024])
+    X = idblock50(X,[256, 256, 1024])
+    X = idblock50(X,[256, 256, 1024])
+
+    X = convblock50(X, filters=[512, 512, 2048])
+    X = idblock50(X, [512, 512, 2048])
+    X = idblock50(X, [512, 512, 2048])
+
+    X = GlobalAveragePooling2D()(X)
+    X=Flatten()(X)
+    pred = Dense(2, activation='softmax', activity_regularizer=regularizers.l2(1e-5))(X) 
+    print(pred.shape)
+
+    model = Model(inputs=inputs, outputs=pred, name='ResNet50')
+    
+    return model
