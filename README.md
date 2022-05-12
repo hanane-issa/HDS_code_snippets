@@ -1,5 +1,5 @@
 # HDS_code-snippets
-Code examples from projects I have worked on.
+Here are three code examples from projects I worked on.
 
 -ResNet34 units and architecture: building from scratch.
 
