@@ -1,4 +1,4 @@
-# HDS_code-snippets
+# Code snippets from health data science projects
 Here are three code examples from projects I worked on.
 
 -ResNet34 units and architecture: building from scratch.
